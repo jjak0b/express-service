@@ -1,11 +1,13 @@
 var express = require('express')
 var app = express()
+var path = require("path");
 
 var indexPage = [
   '<!DOCTYPE html>',
   '<html lang="en">',
   '<head>',
   '<meta charset="utf-8">',
+  '<link rel="stylesheet" type="text/css" href="style.css" />',
   '</head>',
   '<body>',
   '<h1>Hello World</h1>',
@@ -20,6 +22,7 @@ var aboutPage = [
   '<html lang="en">',
   '<head>',
   '<meta charset="utf-8">',
+  '<link rel="stylesheet" type="text/css" href="style.css" />',
   '</head>',
   '<body>',
   '<h1>About express-service</h1>',
@@ -38,5 +41,6 @@ function sendAboutPage (req, res) {
 
 app.get('/', sendIndexPage)
 app.get('/about', sendAboutPage)
+app.get('*', express.static( path.join( "." ) ) );
 
 module.exports = app
