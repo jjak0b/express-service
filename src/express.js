@@ -7,7 +7,10 @@ const serveStaticProxy = httpProxy.createProxyServer()
 
 express.static = function (root, options) {
   function serveProxy (req, res) {
-    let endPath = path.join(path.sep, root, req.params[ 0 ])
+    let endPath = path.join(path.sep, root);
+    if( req.params & req.params.length ) {
+      endPath = path.join( endPath, path.join.apply(null, req.params) );
+    }
 
     let parsedURL = new URL(req.originalUrl)
     parsedURL.pathname = endPath
