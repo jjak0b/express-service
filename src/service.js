@@ -3,17 +3,18 @@
 // ServiceWorker script
 // functions as an adaptor between the Express
 // and the ServiceWorker environment
-require('./patch-sw-environment-for-express')
+const { http } = require('./patch-sw-environment-for-express')
+const os = require('os')
+const url = require('url')
+const myName = 'express-service'
 
 // server - Express application, as in
 // var express = require('express')
 // var app = express()
 // think of this as equivalent to http.createServer(app)
-function expressService (app, cachedResources = [],
-  cacheName = 'express-service') {
-  /* global self, Promise, Response, fetch, caches */
-  const url = require('url')
-  const myName = 'express-service'
+function expressService (app, cachedResources = [], cacheName = 'express-service') {
+  /* global self, Promise, Response, Blob, caches */
+
   console.log(myName, 'startup')
 
   self.addEventListener('install', function (event) {
@@ -33,114 +34,80 @@ function expressService (app, cachedResources = [],
     console.log(myName, 'activated')
   })
 
-  function isJsRequest (path) {
-    return /\.js$/.test(path)
-  }
-
-  function isCssRequest (path) {
-    return /\.css$/.test(path)
-  }
-
-  function isFormPost (req) {
-    return req.headers.get('content-type') === 'application/x-www-form-urlencoded'
-  }
-
-  function formToObject (text) {
-    var obj = {}
-    text.split('&').forEach(function (line) {
-      const parts = line.split('=')
-      if (parts.length === 2) {
-        obj[parts[0]] = decodeURIComponent(parts[1].replace(/\+/g, ' '))
-      }
-    })
-    return obj
-  }
-
   self.addEventListener('fetch', function (event) {
     const parsedUrl = url.parse(event.request.url)
-    console.log(myName, 'fetching page', parsedUrl.path)
 
-    if (isJsRequest(parsedUrl.path) || isCssRequest(parsedUrl.path)) {
-      event.respondWith(
-        caches.open(cacheName).then(cache => {
-          return cache.match(event.request)
-            .then(cached => {
-              if (cached) {
-                return cached
-              }
-              return Promise.reject()
-            })
-          .catch(() => fetch(event.request))
-        })
-      )
+    if (os.hostname() !== parsedUrl.hostname) {
       return
     }
 
+    console.log(myName, 'fetching page', parsedUrl)
+
     event.respondWith(new Promise(function (resolve) {
       // let Express handle the request, but get the result
-      console.log(myName, 'handle request', JSON.stringify(parsedUrl, null, 2))
+      console.log(myName, 'handle request', JSON.stringify(parsedUrl, null, 2), event.request)
 
       event.request.clone().text().then(function (text) {
-        var body = text
-        if (isFormPost(event.request)) {
-          body = formToObject(text)
-        }
+        let body = text
 
-        var req = {
-          url: parsedUrl.href,
-          method: event.request.method,
-          body: body,
-          headers: {
-            'content-type': event.request.headers.get('content-type')
-          },
-          unpipe: function () {},
-          connection: {
-            remoteAddress: '::1'
-          }
+        // setup request
+        let responseOptions = {
+          status: 200,
+          statusText: undefined,
+          headers: event.request.headers
         }
-        // console.log(req)
-        var res = {
-          _headers: {},
-          setHeader: function setHeader (name, value) {
-            // console.log('set header %s to %s', name, value)
-            this._headers[name] = value
-          },
-          getHeader: function getHeader (name) {
-            return this._headers[name]
-          },
-          get: function get (name) {
-            return this._headers[name]
-          }
-        }
+        responseOptions.statusText = http.STATUS_CODES[ responseOptions.status ]
+        let fakeResponse = new Response(body, responseOptions)
+        Object.defineProperty(fakeResponse, 'url', { value: event.request.url })
+        let req = new http.IncomingMessage(null, fakeResponse, 'fetch', 6000)
+        // empty stubs
+        req.method = event.request.method
+        req.connection = {}
+        req.socket = {}
 
-        function endWithFinish (chunk, encoding) {
-          console.log('ending response for request', req.url)
-          console.log('output "%s ..."', chunk.toString().substr(0, 10))
-          console.log('%d %s %d', res.statusCode || 200,
-            res.get('Content-Type'),
-            res.get('Content-Length'))
-          // end.apply(res, arguments)
-          const responseOptions = {
-            status: res.statusCode || 200,
-            headers: {
-              'Content-Length': res.get('Content-Length'),
-              'Content-Type': res.get('Content-Type')
-            }
-          }
-          if (res.get('Location')) {
-            responseOptions.headers.Location = res.get('Location')
-          }
-          if (res.get('X-Powered-By')) {
-            responseOptions.headers['X-Powered-By'] = res.get('X-Powered-By')
-          }
-          resolve(new Response(chunk, responseOptions))
-        }
+        console.log(myName, 'Forwarding', event.request, 'as fake request to express:', req)
 
-        res.end = endWithFinish
+        // setup response
+        let res = new http.ServerResponse({ headers: {} })
+        // replace listener in stream-http.IncomingMessage when "finish" event has been triggered by Writable.end()
+        res._onFinish = function () {
+          _onFinish(req, this, resolve, event.request)
+        }.bind(res)
+
         app(req, res)
       })
     }))
   })
+}
+
+function _onFinish (req, res, resolve, originalRequest) {
+  let opts = res._opts
+  let body
+  if (opts.method !== 'GET' && opts.method !== 'HEAD') {
+    body = new Blob(res._body, {
+      type: (res.getHeader('content-type') || {}) || ''
+    })
+  }
+
+  console.log('output "%s ..."', res._body.toString().substr(0, 10))
+  console.log('%d %s %d', res.statusCode || 200,
+    res.getHeader('Content-Type'),
+    res.getHeader('Content-Length')
+  )
+
+  let responseOptions = {
+    status: res.statusCode,
+    statusText: http.STATUS_CODES[ res.statusCode ],
+    headers: res.headers
+  }
+  let response = new Response(
+    body,
+    responseOptions
+  )
+
+  console.log(myName, 'resolving', req, ' through', res, 'as', response)
+
+  resolve(response)
 }
 
 module.exports = expressService
