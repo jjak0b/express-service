@@ -7,7 +7,7 @@ var indexPage = [
   '<html lang="en">',
   '<head>',
   '<meta charset="utf-8">',
-  '<link rel="stylesheet" type="text/css" href="style.css" />',
+  '<link rel="stylesheet" type="text/css" href="/static/css/style.css" />',
   '</head>',
   '<body>',
   '<h1>Hello World</h1>',
@@ -22,7 +22,7 @@ var aboutPage = [
   '<html lang="en">',
   '<head>',
   '<meta charset="utf-8">',
-  '<link rel="stylesheet" type="text/css" href="style.css" />',
+  '<link rel="stylesheet" type="text/css" href="/static/css/style.css" />',
   '</head>',
   '<body>',
   '<h1>About express-service</h1>',
@@ -41,6 +41,8 @@ function sendAboutPage (req, res) {
 
 app.get('/', sendIndexPage)
 app.get('/about', sendAboutPage)
-app.get('*', express.static( path.join( "." ) ) );
-
+app.use('/static', require("./routes/static") );
+app.use('*', function (req, res) {
+  res.sendStatus( 404 );
+});
 module.exports = app
