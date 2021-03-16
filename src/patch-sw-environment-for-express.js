@@ -6,10 +6,12 @@ if (typeof setImmediate === 'undefined') {
     setTimeout(cb.bind(null, param), 0)
   }
 }
+// patch http env
+var http = require('./patch-http')
+
+// patch express env
+require('./patch-express')
 
 module.exports = {
-  // patch http env
-  http: require('./http'),
-  // patch express env
-  express: require('./express').express
+  http
 }
