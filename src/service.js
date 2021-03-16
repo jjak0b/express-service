@@ -5,8 +5,8 @@
 // and the ServiceWorker environment
 const { http } = require('./patch-sw-environment-for-express')
 const os = require('os')
-const url = require('url')
-const myName = 'express-service'
+const Url = require('url-parse');
+const debug = require( "debug" )('express-service')
 
 // server - Express application, as in
 // var express = require('express')
@@ -15,37 +15,36 @@ const myName = 'express-service'
 function expressService (app, cachedResources = [], cacheName = 'express-service') {
   /* global self, Promise, Response, Blob, caches */
 
-  console.log(myName, 'startup')
+  debug( 'startup' )
 
   self.addEventListener('install', function (event) {
-    console.log(myName, 'installed')
+    debug('installed')
     if (cachedResources.length) {
       event.waitUntil(
         caches.open(cacheName)
           .then((cache) => cache.addAll(cachedResources))
           .then(() => {
-            console.log(myName, 'cached %d resources', cachedResources.length)
+            debug( 'cached %d resources', cachedResources.length)
           })
       )
     }
   })
 
   self.addEventListener('activate', function () {
-    console.log(myName, 'activated')
+    debug('activated')
   })
 
   self.addEventListener('fetch', function (event) {
-    const parsedUrl = url.parse(event.request.url)
-
+    const parsedUrl = new Url(event.request.url)
     if (os.hostname() !== parsedUrl.hostname) {
       return
     }
 
-    console.log(myName, 'fetching page', parsedUrl)
+    debug('fetching page', parsedUrl)
 
     event.respondWith(new Promise(function (resolve) {
       // let Express handle the request, but get the result
-      console.log(myName, 'handle request', JSON.stringify(parsedUrl, null, 2), event.request)
+      debug('handle request', JSON.stringify(parsedUrl, null, 2), event.request)
 
       event.request.clone().text().then(function (text) {
         let body = text
@@ -65,7 +64,7 @@ function expressService (app, cachedResources = [], cacheName = 'express-service
         req.connection = {}
         req.socket = {}
 
-        console.log(myName, 'Forwarding', event.request, 'as fake request to express:', req)
+        debug('Forwarding to express', event.request, 'as fake request:', req)
 
         // setup response
         let res = new http.ServerResponse({ headers: {} })
@@ -89,8 +88,8 @@ function _onFinish (req, res, resolve, originalRequest) {
     })
   }
 
-  console.log('output "%s ..."', res._body.toString().substr(0, 10))
-  console.log('%d %s %d', res.statusCode || 200,
+  debug('output "%s ..."', res._body.toString().substr(0, 10))
+  debug('%d %s %d', res.statusCode || 200,
     res.getHeader('Content-Type'),
     res.getHeader('Content-Length')
   )
@@ -105,7 +104,7 @@ function _onFinish (req, res, resolve, originalRequest) {
     responseOptions
   )
 
-  console.log(myName, 'resolving', req, ' through', res, 'as', response)
+  debug( 'Resolving', req, ' through', res, 'as', response)
 
   resolve(response)
 }
