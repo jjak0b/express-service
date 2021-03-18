@@ -1,94 +1,135 @@
 'use strict'
+/* global self, Promise, Response, Blob, caches */
+
+const { http } = require('./patch-sw-environment-for-express');
+const express = require("express");
+const os = require('os');
+const path = require( "path" );
+const Url = require('url-parse');
+const debug = require( "debug" )('express-service');
 
 // ServiceWorker script
 // functions as an adaptor between the Express
 // and the ServiceWorker environment
-const { http } = require('./patch-sw-environment-for-express')
-const express = require("express");
-const os = require('os')
-const path = require( "path" );
-const Url = require('url-parse');
-const debug = require( "debug" )('express-service')
+class Server {
+  constructor () {
+    this.resolveMount = null;
+    this.promiseMount = new Promise( (resolve) => this.resolveMount = resolve );
 
-// server - Express application, as in
-// var express = require('express')
-// var app = express()
-// think of this as equivalent to http.createServer(app)
-function expressService (app, cachedResources = [], cacheName = 'express-service') {
-  /* global self, Promise, Response, Blob, caches */
+    this.mountUrl = null;
+    this.serverApp = express();
+    this.port = 80;
+    this.registerService();
+  }
 
-  debug( 'startup' )
+  registerService() {
+    self.addEventListener('install', this.onInstall.bind( this ) );
+    self.addEventListener('activate', this.onActivate.bind( this ) );
+    self.addEventListener('fetch', this.onFetch.bind( this ) );
+  }
 
-  let server = express();
+  mount( app ) {
+    setImmediate(this.resolveMount, app );
+  }
 
-  self.addEventListener('install', function (event) {
-    let mountUrl = new Url( self.registration.scope );
-    let mountPath = mountUrl.pathname;
+  listen( port ) {
+    if( port ) {
+      this.port = port;
+    }
+  }
 
-    server.all( "*", mountExpressAt ( mountPath ) );
-    server.use( mountPath, app );
-    app = server;
+  onInstall(event) {
+    this.mountUrl = new Url( self.registration.scope );
+    let mountPath = this.mountUrl.pathname;
 
+    this.serverApp.all( "*", mountExpressAt( mountPath ) );
     debug('installed at mount: \"%s\"', mountPath, self.registration );
 
-    if (cachedResources.length) {
-      event.waitUntil(
-        caches.open(cacheName)
-          .then((cache) => cache.addAll(cachedResources))
-          .then(() => {
-            debug( 'cached %d resources', cachedResources.length)
-          })
-      )
-    }
-  })
+    this.promiseMount
+      .then( (app) => {
+        this.serverApp.use( this.mountUrl.pathname, app )
+        debug("Mounted app @", this.mountUrl.toString() );
+      })
+  }
 
-  self.addEventListener('activate', function () {
-    debug('activated')
-  })
+  onActivate(event) {
+    debug("Activated");
+  }
 
-  self.addEventListener('fetch', function (event) {
+  onFetch(event) {
     const parsedUrl = new Url(event.request.url)
-    if (os.hostname() !== parsedUrl.hostname) {
+
+    if (
+      parsedUrl.hostname !== os.hostname()
+      || ( !parsedUrl.port.length && 80 !== this.port ) || (parsedUrl.port.length && parsedUrl.port !== this.port.toString() )
+    ) {
+      // ignore unhandled
+      debug("Ignoring", parsedUrl.toString() );
       return
     }
 
-    debug('fetching page', parsedUrl)
+    debug('Fetching page', parsedUrl)
 
-    event.respondWith(new Promise(function (resolve) {
+    event.respondWith(
+      this.handle( event.request )
+    );
+  }
+
+  /**
+   *
+   * @param request {Request}
+   * @return {Response|Promise<Response>}
+   */
+  handle( request ) {
+    const parsedUrl = new Url(request.url)
+    let app = this.serverApp;
+
+    // setup empty response
+    let res = new http.ServerResponse({ headers: {} })
+
+    return new Promise(function (resolve) {
       // let Express handle the request, but get the result
-      debug('handle request', JSON.stringify(parsedUrl, null, 2), event.request)
+      debug('handle request', JSON.stringify(parsedUrl, null, 2), request)
 
-      event.request.clone().text().then(function (text) {
+      request.clone().text().then(function (text) {
         let body = text
 
         // setup request
         let responseOptions = {
           status: 200,
           statusText: undefined,
-          headers: event.request.headers
+          headers: request.headers
         }
         responseOptions.statusText = http.STATUS_CODES[ responseOptions.status ]
         let fakeResponse = new Response(body, responseOptions)
-        Object.defineProperty(fakeResponse, 'url', { value: event.request.url })
+        Object.defineProperty(fakeResponse, 'url', { value: request.url })
         let req = new http.IncomingMessage(null, fakeResponse, 'fetch', 6000)
         // empty stubs
-        req.method = event.request.method
+        req.method = request.method
         req.connection = {}
         req.socket = {}
 
-        debug('Forwarding to express', event.request, 'as fake request:', req)
-
-        // setup response
-        let res = new http.ServerResponse({ headers: {} })
         // replace listener in stream-http.IncomingMessage when "finish" event has been triggered by Writable.end()
         res._onFinish = function () {
-          _onFinish(req, this, resolve, event.request)
+          _onFinish(req, this, resolve, request)
         }.bind(res)
 
+        debug('Forwarding to express', request, 'as fake request:', req)
+
         app(req, res)
-      })
-    }))
-  })
+      });
+    });
+  }
+}
+
+// server - Express application, as in
+// var express = require('express')
+// var app = express()
+// think of this as equivalent to http.createServer(app)
+function expressService (app) {
+  let server = new Server();
+  server.mount( app );
+  return server;
 }
 
 function mountExpressAt ( mountPath ) {
@@ -136,4 +177,7 @@ function _onFinish (req, res, resolve, originalRequest) {
   resolve(response)
 }
 
-module.exports = expressService
+module.exports = {
+  ExpressService: Server,
+  createServer: expressService
+}
