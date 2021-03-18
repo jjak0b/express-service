@@ -6,13 +6,15 @@ const httpProxy = require('http-proxy')
 const serveStaticProxy = httpProxy.createProxyServer()
 const debug = require( "debug" )("express-service:express.static")
 
-express.static = function (root, options) {
+express.static = function (fs_root, options) {
   function serveProxy (req, res) {
 
     let originalUrl = new Url(req.originalUrl)
     let pathname = new Url(req.url).pathname
+    let mountUrl = new Url( self.registration.scope );
+    let root = path.join( mountUrl.pathname, fs_root );
 
-    debug( "Got request to serve static", pathname )
+    debug( "Got request", req, "to serve static", pathname, "from", root, "starting from scope", mountUrl.pathname );
 
     // make sure redirect occurs at mount
     if (pathname === '/' && originalUrl.pathname.substr(-1) !== '/') {
