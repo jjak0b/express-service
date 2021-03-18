@@ -12,7 +12,7 @@ var indexPage = [
   '<body>',
   '<h1>Hello World</h1>',
   '<p>Served by Express framework</p>',
-  '<p>read <a href="/about">about page</a></p>',
+  '<p>read <a href="./about">about page</a></p>',
   '</body>',
   '</html>'
 ].join('\n')
@@ -41,7 +41,7 @@ function sendAboutPage (req, res) {
 
 app.get('/', sendIndexPage)
 app.get('/about', sendAboutPage)
-app.use('/static', require("./routes/static") );
+app.use('/static', express.static( path.join( path.sep ) ) );
 app.use('*', function (req, res) {
   res.sendStatus( 404 );
 });
