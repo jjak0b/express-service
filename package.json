@@ -17,9 +17,9 @@
     "example": "npm run example-service && npm run example-client",
     "example-service": "browserify examples/basic/service-worker-server.js -o dist/express-service.js",
     "example-client": "ncp src/client.js dist/client.js",
-    "start": "http-server dist",
+    "start": "npm run dev-start",
     "stand-alone": "node --harmony examples/basic/stand-alone.js",
-    "dev-start": "http-server dist -c-1 -p 3007",
+    "dev-start": "http-server dist -c-1 -p 80",
     "issues": "git-issues",
     "semantic-release": "semantic-release pre && npm publish && semantic-release post"
   },
