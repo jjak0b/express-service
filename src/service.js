@@ -6,6 +6,9 @@ const express = require("express");
 const os = require('os');
 const path = require( "path" );
 const Url = require('url-parse');
+const charset = require('charset');
+const jschardet = require('jschardet');
+const Buffer = require("buffer").Buffer;
 const debug = require( "debug" )('express-service');
 
 // ServiceWorker script
@@ -85,41 +88,86 @@ class Server {
     let app = this.serverApp;
 
     // setup empty response
-    let res = new http.ServerResponse({ headers: {} })
+    let res = buildResponse();
+
+    // let Express handle the request, but get the result
+    debug('handle request', JSON.stringify(parsedUrl, null, 2), request );
 
     return new Promise(function (resolve) {
-      // let Express handle the request, but get the result
-      debug('handle request', JSON.stringify(parsedUrl, null, 2), request)
+      request = request.clone();
+      buildRequest( request )
+        .then( req => {
 
-      request.clone().text().then(function (text) {
-        let body = text
+          // replace listener in stream-http.IncomingMessage when "finish" event has been triggered by Writable.end()
+          res._onFinish = function () {
+            _onFinish(req, this, resolve, request)
+          }.bind(res)
 
-        // setup request
-        let responseOptions = {
-          status: 200,
-          statusText: undefined,
-          headers: request.headers
+          debug('Forwarding to express', request, 'as fake request:', req)
+
+          app(req, res)
+        })
+    })
+  }
+}
+
+/**
+ *
+ * @param request {Request}
+ * @return Promise<htto.IncomingMessage>
+ */
+function buildRequest( request ) {
+  return request.blob()
+    .then(( blob ) => blob.text()
+      .then( ( body ) => {
+
+        if (!request.body) {
+          // all browsers don't support Request.body: why ?!
+          // Safari, Opera don't support Blob.stream()
+          Object.defineProperty(request, 'body', { value: blob.stream() })
         }
-        responseOptions.statusText = http.STATUS_CODES[ responseOptions.status ]
-        let fakeResponse = new Response(body, responseOptions)
-        Object.defineProperty(fakeResponse, 'url', { value: request.url })
-        let req = new http.IncomingMessage(null, fakeResponse, 'fetch', 6000)
+
+        let rawHeaders = Object.fromEntries( request.headers.entries() );
+        let headers = new Headers( rawHeaders );
+
+        // use encoding based on headers or detection
+        let encoding = request.headers.get("charset");
+
+        // looks like we don't have some headers like charset and content-length automatically set by browser in service worker
+        // so try to set them
+        if (!encoding) {
+          encoding = charset( rawHeaders, body)
+            || jschardet.detect(body).encoding;
+          if( encoding ) {
+            encoding = encoding.toLowerCase();
+          }
+
+          headers.append("charset", encoding);
+        }
+
+        if (!headers.has("content-length") && !headers.has("transfer-encoding")) {
+          headers.append("content-length", Buffer.byteLength(body, encoding).toString())
+        }
+
+        Object.defineProperty(request, 'headers', { value: headers })
+
+        let req = new http.IncomingMessage(null, request, 'fetch', 6000)
+
         // empty stubs
         req.method = request.method
         req.connection = {}
-        req.socket = {}
+        req.socket = {} // this could be linked to a virtual socket
 
-        // replace listener in stream-http.IncomingMessage when "finish" event has been triggered by Writable.end()
-        res._onFinish = function () {
-          _onFinish(req, this, resolve, request)
-        }.bind(res)
+        return req;
+  }))
+}
 
-        debug('Forwarding to express', request, 'as fake request:', req)
-
-        app(req, res)
-      });
-    });
-  }
+/**
+ *
+ * @return {http.ServerResponse}
+ */
+function buildResponse () {
+  return new http.ServerResponse({ headers: {} })
 }
 
 // server - Express application, as in
@@ -172,7 +220,7 @@ function _onFinish (req, res, resolve, originalRequest) {
     responseOptions
   )
 
-  debug( 'Resolving', req, ' through', res, 'as', response)
+  debug( 'Resolving', req.originalUrl, req, 'through', res, 'as', response)
 
   resolve(response)
 }
