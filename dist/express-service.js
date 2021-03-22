@@ -90284,6 +90284,7 @@ const charset = require('charset');
 const jschardet = require('jschardet');
 const Buffer = require("buffer").Buffer;
 const debug = require( "debug" )('express-service');
+const { fromJSON: cookieFromJSON } = require("tough-cookie");
 
 // ServiceWorker script
 // functions as an adaptor between the Express
@@ -90387,8 +90388,8 @@ class Server {
  */
 function buildRequest( request ) {
   return request.blob()
-    .then(( blob ) => blob.text()
-      .then( ( body ) => {
+    .then( blob => blob.text()
+      .then( body => new Promise( (resolve) => {
 
         if (!request.body) {
           // all browsers don't support Request.body: why ?!
@@ -90418,21 +90419,56 @@ function buildRequest( request ) {
           headers.append("content-length", Buffer.byteLength(body, encoding).toString())
         }
 
-        Object.defineProperty(request, 'headers', { value: headers })
+        getCookiesForRequest( request )
+          .then( (cookies) => {
+            if (cookies && cookies.length && !headers.has("Cookie" ) ) {
+              for (let cookie of cookies) {
+                headers.append( "Cookie", cookie.toString() );
+              }
+            }
+          })
+          .finally( () => {
+            Object.defineProperty(request, 'headers', { value: headers })
 
-        let req = new http.IncomingMessage(null, request, 'fetch', 6000)
+            let req = new http.IncomingMessage(null, request, 'fetch', 6000)
 
-        // empty stubs
-        req.method = request.method
-        req.connection = {
-          encrypted: !!global.isSecureContext
-        }
-        req.socket = {} // this could be linked to a virtual socket
+            // empty stubs
+            req.method = request.method
+            req.connection = {
+              encrypted: !!global.isSecureContext
+            }
+            req.socket = {} // this could be linked to a virtual socket
 
-        return req;
-  }))
+            resolve( req );
+          })
+      }))
+    )
 }
 
+/**
+ *
+ * @param request {Request}
+ * @return {Promise<Cookie[]|null>}
+ */
+function getCookiesForRequest( request ) {
+  if( "cookieStore" in self ) {
+    return self.cookieStore.getAll( { url: self.location.href } )
+      .then( (cookiesStored) => {
+        if( cookiesStored ) {
+          // adapt Cookie Store API structure to "tough-cookie" object structure
+          return cookiesStored.map( (cookie) => {
+            cookie.key = cookie.name;
+            return cookieFromJSON( cookie );
+          });
+        }
+        return null;
+      })
+      .catch( () => Promise.resolve(null ) )
+  }
+  else {
+    return Promise.resolve( null );
+  }
+}
 /**
  *
  * @return {http.ServerResponse}
@@ -90472,4 +90508,4 @@ module.exports = {
 }
 
 }).call(this)}).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {},require("timers").setImmediate)
-},{"./patch-sw-environment-for-express":433,"buffer":83,"charset":88,"debug":102,"express":149,"jschardet":238,"os":303,"path":321,"timers":407,"url-parse":420}]},{},[2]);
+},{"./patch-sw-environment-for-express":433,"buffer":83,"charset":88,"debug":102,"express":149,"jschardet":238,"os":303,"path":321,"timers":407,"tough-cookie":409,"url-parse":420}]},{},[2]);
