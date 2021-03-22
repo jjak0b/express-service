@@ -87,22 +87,22 @@ class Server {
     const parsedUrl = new Url(request.url)
     let app = this.serverApp;
 
-    // setup empty response
-    let res = buildResponse();
-
     // let Express handle the request, but get the result
-    debug('handle request', JSON.stringify(parsedUrl, null, 2), request );
+    debug('handle request', JSON.stringify(parsedUrl, null, 2), request, Object.fromEntries( request.headers.entries()));
 
     return new Promise(function (resolve) {
       request = request.clone();
       buildRequest( request )
         .then( req => {
 
+          // setup empty response
+          let res = buildResponse( request, resolve );
+/*
           // replace listener in stream-http.IncomingMessage when "finish" event has been triggered by Writable.end()
           res._onFinish = function () {
             _onFinish(req, this, resolve, request)
           }.bind(res)
-
+*/
           debug('Forwarding to express', request, 'as fake request:', req)
 
           app(req, res)
@@ -155,7 +155,9 @@ function buildRequest( request ) {
 
         // empty stubs
         req.method = request.method
-        req.connection = {}
+        req.connection = {
+          encrypted: !!global.isSecureContext
+        }
         req.socket = {} // this could be linked to a virtual socket
 
         return req;
@@ -166,8 +168,8 @@ function buildRequest( request ) {
  *
  * @return {http.ServerResponse}
  */
-function buildResponse () {
-  return new http.ServerResponse({ headers: {} })
+function buildResponse ( request, responseResolveFunc ) {
+  return new http.ServerResponse({ headers: {} }, request, responseResolveFunc );
 }
 
 // server - Express application, as in
