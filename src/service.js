@@ -1,5 +1,5 @@
 'use strict'
-/* global self, Promise, Response, Blob, caches */
+/* global self, Promise, Response, Blob */
 
 const { http } = require('./patch-sw-environment-for-express');
 const express = require("express");
@@ -97,12 +97,7 @@ class Server {
 
           // setup empty response
           let res = buildResponse( request, resolve );
-/*
-          // replace listener in stream-http.IncomingMessage when "finish" event has been triggered by Writable.end()
-          res._onFinish = function () {
-            _onFinish(req, this, resolve, request)
-          }.bind(res)
-*/
+
           debug('Forwarding to express', request, 'as fake request:', req)
 
           app(req, res)
@@ -195,36 +190,6 @@ function mountExpressAt ( mountPath ) {
     next();
   }
   return handler;
-}
-
-function _onFinish (req, res, resolve, originalRequest) {
-  let opts = res._opts
-  let body
-  if (opts.method !== 'GET' && opts.method !== 'HEAD') {
-    body = new Blob(res._body, {
-      type: (res.getHeader('content-type') || {}) || ''
-    })
-  }
-
-  debug('output "%s ..."', res._body.toString().substr(0, 10))
-  debug('%d %s %d', res.statusCode || 200,
-    res.getHeader('Content-Type'),
-    res.getHeader('Content-Length')
-  )
-
-  let responseOptions = {
-    status: res.statusCode,
-    statusText: http.STATUS_CODES[ res.statusCode ],
-    headers: res.headers
-  }
-  let response = new Response(
-    body,
-    responseOptions
-  )
-
-  debug( 'Resolving', req.originalUrl, req, 'through', res, 'as', response)
-
-  resolve(response)
 }
 
 module.exports = {
