@@ -90298,6 +90298,17 @@ class Server {
     this.serverApp = express();
     this.port = 80;
     this.registerService();
+
+    this.promiseMount
+      .then( (app) => {
+        if(!this.mountUrl) {
+          this.mountUrl = new Url( self.registration.scope );
+        }
+        let mountPath = this.mountUrl.pathname;
+        this.serverApp.all( "*", mountExpressAt( mountPath ) );
+        this.serverApp.use( this.mountUrl.pathname, app )
+        debug("Mounted app @", this.mountUrl.toString() );
+      })
   }
 
   registerService() {
@@ -90320,14 +90331,7 @@ class Server {
     this.mountUrl = new Url( self.registration.scope );
     let mountPath = this.mountUrl.pathname;
 
-    this.serverApp.all( "*", mountExpressAt( mountPath ) );
     debug('installed at mount: \"%s\"', mountPath, self.registration );
-
-    this.promiseMount
-      .then( (app) => {
-        this.serverApp.use( this.mountUrl.pathname, app )
-        debug("Mounted app @", this.mountUrl.toString() );
-      })
   }
 
   onActivate(event) {
