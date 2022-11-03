@@ -117,50 +117,61 @@ class Server {
  * @return Promise<htto.IncomingMessage>
  */
 function buildRequest( request ) {
-  return request.blob()
-    .then( blob => blob.text()
-      .then( body => new Promise( (resolve) => {
 
-        if (!request.body) {
-          // all browsers don't support Request.body: why ?!
-          // Safari, Opera don't support Blob.stream()
-          Object.defineProperty(request, 'body', { value: blob.stream() })
-        }
+    let rawHeaders = Object.fromEntries( request.headers.entries() );
+    let headers = new Headers( rawHeaders );
 
-        let rawHeaders = Object.fromEntries( request.headers.entries() );
-        let headers = new Headers( rawHeaders );
+    let setupBodyStreamPromise = request.body
+        ? Promise.resolve(request.body)
+        : request.blob().then( blob => {
+            // all browsers don't support Request.body: why ?!
+            // Safari, Opera don't support Blob.stream()
+            Object.defineProperty(request, 'body', { value: blob.stream() });
+            return request.body;
+        });
 
-        // use encoding based on headers or detection
+    // clone request otherwise blob.text() will lock the request's stream
+    // and http.IncomingMessage will throw error while reading request's stream
+    let bodyContentPromise = request.clone().blob().then( blob => blob.text() );
+    let setupContentHeaderPromise = bodyContentPromise.then( (body) => new Promise( resolve => {
+
         let encoding = request.headers.get("charset");
 
         // looks like we don't have some headers like charset and content-length automatically set by browser in service worker
         // so try to set them
         if (!encoding) {
-          encoding = charset( rawHeaders, body)
-            || jschardet.detect(body).encoding;
-          if( encoding ) {
-            encoding = encoding.toLowerCase();
-          }
-
-          headers.append("charset", encoding);
+            encoding = charset( rawHeaders, body) || jschardet.detect(body).encoding;
         }
+        if( encoding ) {
+            encoding = encoding.toLowerCase();
+        }
+
+        headers.append("charset", encoding);
 
         if (!headers.has("content-length") && !headers.has("transfer-encoding")) {
-          headers.append("content-length", Buffer.byteLength(body, encoding).toString())
+            headers.append("content-length", Buffer.byteLength(body, encoding).toString())
         }
+        resolve();
+    }));
+    let setupCookiesHeaderPromise = getCookiesForRequest( request ).then( (cookies) => new Promise( resolve => {
+        if (cookies && cookies.length && !headers.has("Cookie" ) ) {
+          for (let cookie of cookies) {
+            headers.append( "Cookie", cookie.toString() );
+          }
+        }
+        resolve();
+    }))
 
-        getCookiesForRequest( request )
-          .then( (cookies) => {
-            if (cookies && cookies.length && !headers.has("Cookie" ) ) {
-              for (let cookie of cookies) {
-                headers.append( "Cookie", cookie.toString() );
-              }
-            }
-          })
-          .finally( () => {
+    return new Promise( resolve => {
+        Promise.allSettled([
+            setupBodyStreamPromise,
+            setupContentHeaderPromise,
+            setupCookiesHeaderPromise
+        ])
+        .finally( () => {
             Object.defineProperty(request, 'headers', { value: headers })
 
-            let req = new http.IncomingMessage(null, request, 'fetch', 6000)
+            let req = new http.IncomingMessage(null, request, 'fetch', () => {} )
 
             // empty stubs
             req.method = request.method
@@ -170,9 +181,8 @@ function buildRequest( request ) {
             req.socket = {} // this could be linked to a virtual socket
 
             resolve( req );
-          })
-      }))
-    )
+        });
+    });
 }
 
 /**
