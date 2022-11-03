@@ -9,6 +9,15 @@ if (typeof setImmediate === 'undefined') {
 // patch http env
 var http = require('./patch-http')
 
+if( !http.ServerResponse.prototype._implicitHeader ) {
+    // leave empty for now: it's used by express-session and node compression lib
+    http.ServerResponse.prototype._implicitHeader = function() {
+        // Implicit headers sent!
+        // this._header = true;
+        // this._headerSent = true;
+    };
+}
+
 // patch express env
 require('./patch-express')
 
